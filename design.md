@@ -447,7 +447,101 @@ and ubiquitous; the **operational reliability, compliance, and scale** are the b
 
 ---
 
-## 10. Investor Thesis (Condensed)
+## 10. Building the Solution — Implementation Blueprint
+
+The format is the standard; the **solution** is the engine + services that produce, validate, and
+serve it. Think of it as three layers: **(1) the spec & SDK** (open), **(2) the normalization
+engine** (the core IP), and **(3) the serving/product surface** (where users and agents consume it).
+
+### 10.1 Component architecture
+
+```
+ ┌───────────────────────── 1. SPEC & SDK (open source) ─────────────────────────┐
+ │  HealthLM schema · validators · canonical-IR model · Markdown/TOON renderers   │
+ └───────────────────────────────────────────────────────────────────────────────┘
+                                      ▲ uses
+ ┌───────────────────────── 2. NORMALIZATION ENGINE (core IP) ───────────────────┐
+ │  Source adapters → Parser → Terminology service → Enrichment → Canonical IR    │
+ │  FHIR/HL7v2/C-CDA/PDF    (SNOMED/LOINC/ICD)   (provenance,consent,lang,dedupe) │
+ └───────────────────────────────────────────────────────────────────────────────┘
+                                      ▼ emits
+ ┌───────────────────────── 3. SERVING & PRODUCT SURFACE ────────────────────────┐
+ │  REST/gRPC API · RAG chunker + embeddings → vector DB · MCP server · Playground │
+ │  Consent/DPDP gateway (ABDM HIE-CM) · audit log · dashboard · conformance badge │
+ └───────────────────────────────────────────────────────────────────────────────┘
+```
+
+**1. Spec & SDK (open).** The HealthLM data model as typed objects, JSON-Schema validators, and
+deterministic Markdown/TOON serializers. Ships as a library (Python first — the AI ecosystem lives
+there; then TS/Java for enterprise EHR teams). This is what developers integrate; keep it tiny and
+dependency-light so adoption is frictionless.
+
+**2. Normalization engine (the moat).** A pipeline:
+- **Source adapters** parse FHIR R4/R5, HL7 v2, C‑CDA, and scanned/PDF records (OCR + clinical NLP
+  for the unstructured tail).
+- **Terminology service** resolves codes ↔ human labels across SNOMED CT / LOINC / ICD‑10 (India's
+  ABDM-mandated sets), caching the heavy vocab tables.
+- **Enrichment** attaches provenance (W3C PROV), consent/PHI metadata (DPDP-aligned), language tags
+  (BHASHINI/22-lang), then dedupes and canonically orders into the **canonical IR**.
+- **Round-trip fidelity tests** guarantee no information loss vs. the source FHIR.
+
+**3. Serving & product surface.**
+- **API** (REST + gRPC) to submit source records and retrieve HealthLM views (Markdown / TOON /
+  chunks).
+- **RAG pipeline:** chunker → embeddings → vector DB (pgvector / Qdrant), so consumers get
+  retrieval-ready output, not just normalized text.
+- **MCP server:** exposes patient context to any agent (Claude, etc.) with scoped, consent-checked
+  access — the agent-native distribution channel.
+- **Consent/DPDP gateway:** integrates ABDM's HIE Consent Manager; enforces purpose/role visibility
+  and writes an immutable audit log.
+- **Playground + dashboard:** paste raw FHIR/HL7 → see HealthLM output + token-savings diff; usage,
+  conformance, and audit views.
+
+### 10.2 Reference tech stack
+
+| Layer | Choice | Why |
+|---|---|---|
+| SDK / engine | **Python** (core), then TS/Java | AI/ML ecosystem; enterprise EHR teams later |
+| OCR / clinical NLP | Off-the-shelf OCR + an LLM extraction step (structured outputs) | Handle the paper/PDF tail; constrained decoding for valid schema |
+| Terminology | Hosted SNOMED/LOINC/ICD service + cache | Heavy tables; resolve once, reuse |
+| Storage | Object store (raw) + Postgres (metadata) + **pgvector/Qdrant** (embeddings) | Lakehouse-lite; vectors for RAG |
+| Serving | FastAPI / gRPC + an **MCP server** | Standard APIs + agent-native channel |
+| Embeddings / LLM | Pluggable (multilingual models for 22-lang) | Avoid lock-in; India-language support |
+| Deploy | Containers; **India-region / on-prem option** | Data residency (DPDP) for hospitals |
+
+### 10.3 MVP → scale (phased build)
+
+- **Phase 0 — Spec v0.1 + FHIR adapter (weeks).** Publish schema, validators, Markdown/TOON
+  serializer, and a **FHIR R4 → HealthLM** converter with a public playground showing token savings.
+  *Goal: developers can try it and see the diff.*
+- **Phase 1 — Engine + RAG + MCP (1–2 quarters).** Add terminology resolution, provenance, the RAG
+  chunker/embeddings, and an MCP server. Land 3–5 design partners (an AI-scribe/diagnostics startup
+  + a diagnostic-lab chain). *Goal: a real product feeding real AI.*
+- **Phase 2 — Consent/DPDP + ABDM + more adapters (2–3 quarters).** HIE-CM consent integration,
+  audit logging, HL7 v2 / C‑CDA / PDF adapters, multilingual enrichment. *Goal: hospital-grade,
+  compliant, India-ready.*
+- **Phase 3 — Conformance program + benchmark + scale.** "HealthLM-certified" badge, public
+  "HealthLM vs. FHIR for AI" benchmark, hosted MCP-as-a-service, enterprise SLAs. *Goal: standard
+  status + recurring revenue.*
+
+### 10.4 What to validate (technical proof points)
+
+1. **Token efficiency** — measured reduction vs. raw FHIR on real bundles (target meaningful % cut).
+2. **Retrieval accuracy** — RAG answer quality on HealthLM chunks vs. FHIR baseline (e.g., on an
+   EHR-QA set akin to FHIR-AgentBench).
+3. **Round-trip fidelity** — no information loss source → IR → source.
+4. **Consent enforcement** — masked fields never reach the model; audit log is complete.
+5. **Multilingual integrity** — language-tagged content survives normalization and retrieval.
+
+### 10.5 Team to build it (lean MVP)
+
+A founding team of ~3–5: a **health-data/FHIR engineer**, an **AI/RAG engineer**, a **backend/infra
+engineer**, plus **clinical + compliance (DPDP/ABDM) advisory**. The open SDK and benchmark are the
+top-of-funnel; design-partner deployments fund the engine build.
+
+---
+
+## 11. Investor Thesis (Condensed)
 
 - **Problem:** Fragmented health data is the binding constraint on healthcare AI; existing
   standards are exchange-native, not AI-native.
@@ -463,7 +557,7 @@ and ubiquitous; the **operational reliability, compliance, and scale** are the b
 
 ---
 
-## 11. Risks & Open Questions
+## 12. Risks & Open Questions
 
 | Risk | Mitigation / open question |
 |---|---|
@@ -477,7 +571,7 @@ and ubiquitous; the **operational reliability, compliance, and scale** are the b
 
 ---
 
-## 12. Appendix: Sources
+## 13. Appendix: Sources
 
 **India — ABDM, policy, market**
 - [Organiser — 90 crore ABHA milestone (May 2026)](https://organiser.org/2026/05/31/355992/bharat/ayushman-bharat-crosses-90-cr-abha-accounts-how-modi-govt-is-building-the-worlds-largest-digital-health-ecosystem/)
